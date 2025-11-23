@@ -2,7 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const app=express();
 require('dotenv').config();
-const { MongoClient, ServerApiVersion } = require('mongodb');
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const port=process.env.PORT || 3000;
 
 // Middleware
@@ -28,6 +28,7 @@ async function run() {
     const parcelsCollection = db.collection('parcels');
 
     // Parcels api..............
+
     // get parcels
     app.get('/parcels',async(req,res)=>{
         const query= {};
@@ -35,7 +36,6 @@ async function run() {
         if(email){
             query.senderEmail=email;
         }
-
         // sort
         const options= {sort: {createdAt:-1}}
 
@@ -51,6 +51,15 @@ async function run() {
 
         const result=await parcelsCollection.insertOne(parcel);
         res.send(result);
+    })
+
+    // delete parcels
+    app.delete('/parcels/:id',async(req,res)=>{
+      const id=req.params.id;
+      const query={_id: new ObjectId(id)}
+
+      const result=await parcelsCollection.deleteOne(query);
+      res.send(result)
     })
 
 
