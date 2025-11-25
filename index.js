@@ -5,12 +5,15 @@ require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
+// firebase token
+const admin = require("firebase-admin");
+const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
 
 // tracking id
 const crypto = require('crypto');
 
 function generateTrackingId() {
-  const prefix = "ZAP"; 
+  const prefix = "ZAP";
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, "");
   const random = crypto.randomBytes(4).toString("hex").toUpperCase();
 
@@ -22,6 +25,38 @@ console.log(generateTrackingId());
 // Middleware
 app.use(cors());
 app.use(express.json());
+
+// firebase token
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
+// Token verify
+const verifyFBToken = async (req, res, next) => {
+  // console.log('headers in the middleware', req.headers.authorization);
+
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).send({
+      message: 'unauthorized access'
+    })
+  }
+
+  try {
+    const idToken = token.split(' ')[1];
+    const decode = await admin.auth().verifyIdToken(idToken);
+    req.decoded_email = decode.email;
+
+    console.log('decoded in the token', decode)
+  }
+  catch (error) {
+    console.log(error)
+    return res.status(401).send({
+      message: 'unauthorized access'
+    })
+  }
+  next();
+}
 
 // mongodb
 
@@ -159,20 +194,20 @@ async function run() {
       // console.log('session retrive: ', session);
 
       // transection id dia db theke transaction er data khuje
-      const transactionId=session.payment_intent;
-      const query={transactionId:transactionId};
+      const transactionId = session.payment_intent;
+      const query = { transactionId: transactionId };
 
-      const paymentExist=await paymentsCollection.findOne(query);
-      if(paymentExist){
+      const paymentExist = await paymentsCollection.findOne(query);
+      if (paymentExist) {
         return res.send({
           message: 'already exist',
           transactionId,
-          trackingId:paymentExist.trackingId
+          trackingId: paymentExist.trackingId
         })
       }
 
       //tracking id to add with parcelCollection and send on client side 
-      const trackingId=generateTrackingId();
+      const trackingId = generateTrackingId();
 
       if (session.payment_status === 'paid') {
         const id = session.metadata.parcelId;
@@ -180,7 +215,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: 'paid',
-            trackingId:trackingId
+            trackingId: trackingId
           }
         }
         const result = await parcelsCollection.updateOne(query, update);
@@ -195,7 +230,7 @@ async function run() {
           transactionId: session.payment_intent,
           paymentStatus: session.payment_status,
           paidAt: new Date(),
-          trackingId:trackingId
+          trackingId: trackingId
         }
 
         if (session.payment_status === 'paid') {
@@ -204,8 +239,8 @@ async function run() {
             success: true,
             modifyParcel: result,
             paymentInfo: resultPayment,
-            trackingId:trackingId,
-            transactionId:session.payment_intent
+            trackingId: trackingId,
+            transactionId: session.payment_intent
           })
         }
 
@@ -217,11 +252,19 @@ async function run() {
     })
 
     // show payment history in UI by user email
-    app.get ('/payments',async(req,res)=>{
-      const email=req.query.email;
-      const query={};
-      if(email){
-        query.customerEmail=email;
+    app.get('/payments', verifyFBToken, async (req, res) => {
+      const email = req.query.email;
+      const query = {};
+      // console.log('headers:',req.headers)
+
+      if (email) {
+        query.customerEmail = email;
+      }
+      // check email address for token verify
+      if (email !== req.decoded_email) {
+        return res.status(403).send({
+          message: 'Forbidden access'
+        })
       }
       const result = await paymentsCollection.find(query).toArray();
 
