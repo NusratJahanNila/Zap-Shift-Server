@@ -119,7 +119,7 @@ async function run() {
     //   res.send({url: session.url})
     // })
 
-    // version-2
+    // version-2 : add payment info
     app.post('/create-checkout-session', async (req, res) => {
       const paymentInfo = req.body;
       const amount = parseInt(paymentInfo.cost) * 100;
@@ -214,6 +214,18 @@ async function run() {
       res.send({
         success: true
       })
+    })
+
+    // show payment history in UI by user email
+    app.get ('/payments',async(req,res)=>{
+      const email=req.query.email;
+      const query={};
+      if(email){
+        query.customerEmail=email;
+      }
+      const result = await paymentsCollection.find(query).toArray();
+
+      res.send(result);
     })
 
     // ping
