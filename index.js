@@ -7,7 +7,7 @@ const stripe = require('stripe')(process.env.STRIPE_SECRET);
 const port = process.env.PORT || 3000;
 // firebase token
 const admin = require("firebase-admin");
-const serviceAccount = require("./zap-shift-firebase-adminsdk.json");
+const serviceAccount = require(process.env.SERVICE_kEY);
 
 // tracking id
 const crypto = require('crypto');
@@ -47,7 +47,7 @@ const verifyFBToken = async (req, res, next) => {
     const decode = await admin.auth().verifyIdToken(idToken);
     req.decoded_email = decode.email;
 
-    console.log('decoded in the token', decode)
+    // console.log('decoded in the token', decode)
   }
   catch (error) {
     console.log(error)
@@ -266,7 +266,7 @@ async function run() {
           message: 'Forbidden access'
         })
       }
-      const result = await paymentsCollection.find(query).toArray();
+      const result = (await paymentsCollection.find(query).sort({paidAt: -1}).toArray());
 
       res.send(result);
     })
