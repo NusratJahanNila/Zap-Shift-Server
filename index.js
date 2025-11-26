@@ -20,7 +20,7 @@ function generateTrackingId() {
   return `${prefix}-${date}-${random}`;
 }
 
-console.log(generateTrackingId());
+// console.log(generateTrackingId());
 
 // Middleware
 app.use(cors());
@@ -50,7 +50,7 @@ const verifyFBToken = async (req, res, next) => {
     // console.log('decoded in the token', decode)
   }
   catch (error) {
-    console.log(error)
+    // console.log(error)
     return res.status(401).send({
       message: 'unauthorized access'
     })
@@ -74,11 +74,12 @@ async function run() {
   try {
     await client.connect();
     const db = client.db('zap_shift_db');
+    const usersCollection = db.collection('users');
     const parcelsCollection = db.collection('parcels');
     const paymentsCollection = db.collection('payments');
 
     // Parcels api..............
-
+// .................................................................
     // get parcels
     app.get('/parcels', async (req, res) => {
       const query = {};
@@ -121,7 +122,7 @@ async function run() {
       res.send(result)
     })
 
-
+// .................................................................................
     // Payment related api:
     // version-1
 
@@ -270,6 +271,32 @@ async function run() {
 
       res.send(result);
     })
+
+    // .............................................................................................
+    // User related api.............
+
+    app.post('/users',async(req,res)=>{
+      const user=req.body;
+      user.role='user';
+      user.createdAt=new Date();
+
+      const email=user.email;
+      const userExist=await usersCollection.findOne({email});
+
+      if(userExist){
+        return res.send({
+          message: 'User already exist!'
+        })
+      }
+
+      const result=await usersCollection.insertOne(user);
+      res.send(result);
+    })
+
+
+
+
+
 
     // ping
     await client.db("admin").command({ ping: 1 });
