@@ -77,6 +77,7 @@ async function run() {
     const usersCollection = db.collection('users');
     const parcelsCollection = db.collection('parcels');
     const paymentsCollection = db.collection('payments');
+    const ridersCollection = db.collection('riders');
 
     // Parcels api..............
 // .................................................................
@@ -292,7 +293,30 @@ async function run() {
       const result=await usersCollection.insertOne(user);
       res.send(result);
     })
+    // .............................................................................................
+    //riders related api.............
 
+    app.post('/riders',async(req,res)=>{
+      const rider=req.body;
+      // rider.role='rider';
+      rider.status='pending';
+      rider.createdAt=new Date();
+
+      const result=await ridersCollection.insertOne(rider);
+      res.send(result);
+    })
+
+    // get riders
+    app.get('/riders',async(req,res)=>{
+      // jodi pending status chai,tahole shudhu shei data dibo, na bolle shob dibo
+      const query={}
+      if(req.query.status){
+        query.status=req.query.status;
+      }
+
+      const result=await ridersCollection.find(query).toArray();
+      res.send(result);
+    })
 
 
 
