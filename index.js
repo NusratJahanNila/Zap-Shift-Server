@@ -11,6 +11,7 @@ const serviceAccount = require(process.env.SERVICE_kEY);
 
 // tracking id
 const crypto = require('crypto');
+const { workerData } = require('worker_threads');
 
 function generateTrackingId() {
   const prefix = "ZAP";
@@ -139,6 +140,34 @@ async function run() {
 
       const result = await parcelsCollection.deleteOne(query);
       res.send(result)
+    })
+
+    // assign rider
+    app.patch('/parcels/:id', async(req,res)=>{
+      const {riderId ,riderName,riderEmail}=req.body;
+      const id=req.params.id;
+      const query={_id: new ObjectId(id)}
+
+      const update={
+        $set:{
+          deliveryStatus: 'driver_assigned',
+          riderId:riderId,
+          riderEmail:riderEmail,
+          riderName:riderName,
+        }
+      }
+
+      const result=await parcelsCollection.updateOne(query,update)
+      
+      // update rider information
+      const riderQuery={_id: new ObjectId(riderId)}
+      const riderUpdate={
+        $set: {
+          workerStatus: 'in_delivery'
+        }    
+      }
+      const riderResult= await ridersCollection.updateOne(riderQuery,riderUpdate);
+      res.send(riderResult)
     })
 
 // .................................................................................
@@ -374,11 +403,17 @@ async function run() {
     // get riders
     app.get('/riders',async(req,res)=>{
       // jodi pending status chai,tahole shudhu shei data dibo, na bolle shob dibo
+      const {status,riderDistrict,workStatus}=req.query;
       const query={}
-      if(req.query.status){
-        query.status=req.query.status;
+      if(status){
+        query.status=status;
       }
-
+      if(riderDistrict){
+        query.riderDistrict=riderDistrict
+      }
+      if(workStatus){
+        query.workStatus=workStatus
+      }
       const result=await ridersCollection.find(query).toArray();
       res.send(result);
     })
