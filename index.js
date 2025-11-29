@@ -79,14 +79,32 @@ async function run() {
     const paymentsCollection = db.collection('payments');
     const ridersCollection = db.collection('riders');
 
+    // middleware Admin before allowing admin activity
+    // must be used after verifyFBToken middleware
+    const verifyAdmin=async(req,res,next)=>{
+      const email =req.decoded_email;
+      const query= {email};
+      const user=await usersCollection.findOne(query);
+
+      if(!user || user.role !== 'admin'){
+        return res.status(403).send({message: 'forbidden access'})
+      }
+
+      next();
+    }
+
     // Parcels api..............
 // .................................................................
     // get parcels
     app.get('/parcels', async (req, res) => {
       const query = {};
-      const { email } = req.query;
+      const { email,deliveryStatus } = req.query;
       if (email) {
         query.senderEmail = email;
+      }
+      // delivery status
+      if(deliveryStatus){
+        query.deliveryStatus=deliveryStatus;
       }
       // sort
       const options = { sort: { createdAt: -1 } }
@@ -217,6 +235,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: 'paid',
+            delivaryStatus:'pending-pickup',
             trackingId: trackingId
           }
         }
@@ -293,6 +312,52 @@ async function run() {
       const result=await usersCollection.insertOne(user);
       res.send(result);
     })
+// get all users data
+    app.get('/users',verifyFBToken,async(req,res)=>{
+      // search
+      const searchText=req.query.searchText;
+      const query={}
+      if(searchText){
+        // query.displayName = {$regex: searchText, $options: 'i'} 
+        
+        query.$or =[
+          {displayName : {$regex: searchText, $options: 'i'}},
+          {email : {$regex: searchText, $options: 'i'}},
+        ]
+      } 
+
+     
+      const cursor=usersCollection.find(query).sort({createdAt:-1}).limit(5);
+      const result= await cursor.toArray();
+
+      res.send(result);
+    })
+
+    // update user to admin
+    app.patch('/users/:id/role',verifyFBToken,verifyAdmin,async(req,res)=>{
+      const id=req.params.id;
+      const query={_id: new ObjectId(id)}
+      const roleInfo=req.body;
+
+      const update={
+        $set: {
+          role: roleInfo.role
+        }
+      }
+      const result = await usersCollection.updateOne(query,update)
+      res.send(result);
+    })
+
+    // user er role dao
+    app.get('/users/:id',async(req,res)=>{
+
+    })
+    app.get('/users/:email/role',async(req,res)=>{
+      const email=req.params.email;
+      const query={email};
+      const user=await usersCollection.findOne(query);
+      res.send({role: user?.role || 'user'})
+    })
     // .............................................................................................
     //riders related api.............
 
@@ -316,6 +381,34 @@ async function run() {
 
       const result=await ridersCollection.find(query).toArray();
       res.send(result);
+    })
+    // update rider's status : pending--> approved/reject
+    app.patch('/riders/:id',verifyFBToken,verifyAdmin,async(req,res)=>{
+      const status= req.body.status;
+      const id=req.params.id;
+      const query={_id : new ObjectId(id)}
+      const update={
+        $set:{
+          status: status,
+          workStatus: 'available'
+        }
+      }
+
+      const result=await ridersCollection.updateOne(query,update);
+
+      //  set role as 'rider' if approved
+      if(status==='approved'){
+        const email = req.body.email;
+        console.log('email is server: ',email)
+        const userQuery={email }
+        const updateUser={
+          $set:{
+            role: 'rider'
+          }
+        }
+        const userResult=await usersCollection.updateOne(userQuery,updateUser)
+      }
+      res.send(result)
     })
 
 
