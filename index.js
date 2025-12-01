@@ -79,6 +79,7 @@ async function run() {
     const parcelsCollection = db.collection('parcels');
     const paymentsCollection = db.collection('payments');
     const ridersCollection = db.collection('riders');
+    const trackingsCollection = db.collection('trackings');
 
     // middleware Admin before allowing admin activity
     // must be used after verifyFBToken middleware
@@ -92,6 +93,18 @@ async function run() {
       }
 
       next();
+    }
+
+    // tracking information for a parcel
+    const logTracking= async (trackingId,status)=>{
+      const log= {
+        trackingId,
+        status,
+        details: status.split('_').join(' '),
+        createdAt: new Date()
+      }
+      const result=await trackingsCollection.insertOne(log);
+      return result;
     }
 
     // Parcels api..............
@@ -150,8 +163,12 @@ async function run() {
     // add parcels
     app.post('/parcels', async (req, res) => {
       const parcel = req.body;
+      const trackingId = generateTrackingId();
       //parcel created time
       parcel.createdAt = new Date();
+      parcel.trackingId = trackingId;
+
+      logTracking(trackingId, 'parcel_created');
 
       const result = await parcelsCollection.insertOne(parcel);
       res.send(result);
@@ -168,7 +185,7 @@ async function run() {
 
     // assign rider
     app.patch('/parcels/:id', async (req, res) => {
-      const { riderId, riderName, riderEmail } = req.body;
+      const { riderId, riderName, riderEmail , trackingId} = req.body;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
 
@@ -191,12 +208,16 @@ async function run() {
         }
       }
       const riderResult = await ridersCollection.updateOne(riderQuery, riderUpdate);
+
+      // Log tracking
+      logTracking(trackingId,'driver_assigned')
+
       res.send(riderResult)
     })
 
     // delivery status upon accept delivery
     app.patch('/parcels/:id/status', async (req, res) => {
-      const { deliveryStatus, riderId } = req.body;
+      const { deliveryStatus, riderId , trackingId } = req.body;
       const query = { _id: new ObjectId(req.params.id) };
       const update = {
         $set: {
@@ -216,6 +237,9 @@ async function run() {
       }
 
       const result = await parcelsCollection.updateOne(query, update);
+
+      // log tracking
+      logTracking(trackingId,deliveryStatus)
       res.send(result);
     })
 
@@ -274,7 +298,8 @@ async function run() {
         mode: 'payment',
         metadata: {
           parcelId: paymentInfo.parcelId,
-          parcelName: paymentInfo.parcelName
+          parcelName: paymentInfo.parcelName,
+          trackingId:paymentInfo.trackingId
         },
         // use query
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -304,8 +329,9 @@ async function run() {
         })
       }
 
-      //tracking id to add with parcelCollection and send on client side 
-      const trackingId = generateTrackingId();
+
+      // use the previous tracking id created during the parcel create which was set to the session metadata during session creation
+      const trackingId = session.metadata.trackingId;
 
       if (session.payment_status === 'paid') {
         const id = session.metadata.parcelId;
@@ -314,7 +340,6 @@ async function run() {
           $set: {
             paymentStatus: 'paid',
             delivaryStatus: 'pending-pickup',
-            trackingId: trackingId
           }
         }
         const result = await parcelsCollection.updateOne(query, update);
@@ -333,7 +358,10 @@ async function run() {
         }
 
         if (session.payment_status === 'paid') {
-          const resultPayment = await paymentsCollection.insertOne(payment)
+          const resultPayment = await paymentsCollection.insertOne(payment);
+
+          logTracking(trackingId,'parcel_paid')
+
           res.send({
             success: true,
             modifyParcel: result,
@@ -496,7 +524,18 @@ async function run() {
     })
 
 
+    // ....................................................................................
+    // Tracking related apis
 
+
+    app.get('/trackings/:trackingId/logs',async(req,res)=>{
+      const trackingId=req.params.trackingId;
+      // console.log('Tracking Id: ',trackingId)
+      const query={trackingId};
+
+      const result=await trackingsCollection.find(query).toArray();
+      res.send(result);
+    })
 
 
     // ping
