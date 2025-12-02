@@ -12,6 +12,7 @@ const serviceAccount = require(process.env.SERVICE_kEY);
 // tracking id
 const crypto = require('crypto');
 const { workerData } = require('worker_threads');
+const { count } = require('console');
 
 function generateTrackingId() {
   const prefix = "ZAP";
@@ -94,16 +95,27 @@ async function run() {
 
       next();
     }
+    const verifyRider = async (req, res, next) => {
+      const email = req.decoded_email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+
+      if (!user || user.role !== 'rider') {
+        return res.status(403).send({ message: 'forbidden access' })
+      }
+
+      next();
+    }
 
     // tracking information for a parcel
-    const logTracking= async (trackingId,status)=>{
-      const log= {
+    const logTracking = async (trackingId, status) => {
+      const log = {
         trackingId,
         status,
         details: status.split('_').join(' '),
         createdAt: new Date()
       }
-      const result=await trackingsCollection.insertOne(log);
+      const result = await trackingsCollection.insertOne(log);
       return result;
     }
 
@@ -160,6 +172,28 @@ async function run() {
       res.send(result);
     })
 
+    // Mongodb Aggregation
+    app.get('/parcels/delivery-status/stats', verifyFBToken, verifyAdmin, async (req, res) => {
+      const pipeline = [
+        {
+          $group: {
+            _id: '$deliveryStatus',
+            count: { $sum: 1 }
+          }
+        },
+        {
+          $project: {
+            status: '$_id',
+            count: 1,
+            // _id: 0
+          }
+        }
+      ]
+
+      const result = await parcelsCollection.aggregate(pipeline).toArray();
+      res.send(result)
+    })
+
     // add parcels
     app.post('/parcels', async (req, res) => {
       const parcel = req.body;
@@ -185,7 +219,7 @@ async function run() {
 
     // assign rider
     app.patch('/parcels/:id', async (req, res) => {
-      const { riderId, riderName, riderEmail , trackingId} = req.body;
+      const { riderId, riderName, riderEmail, trackingId } = req.body;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) }
 
@@ -210,14 +244,14 @@ async function run() {
       const riderResult = await ridersCollection.updateOne(riderQuery, riderUpdate);
 
       // Log tracking
-      logTracking(trackingId,'driver_assigned')
+      logTracking(trackingId, 'driver_assigned')
 
       res.send(riderResult)
     })
 
     // delivery status upon accept delivery
     app.patch('/parcels/:id/status', async (req, res) => {
-      const { deliveryStatus, riderId , trackingId } = req.body;
+      const { deliveryStatus, riderId, trackingId } = req.body;
       const query = { _id: new ObjectId(req.params.id) };
       const update = {
         $set: {
@@ -239,7 +273,7 @@ async function run() {
       const result = await parcelsCollection.updateOne(query, update);
 
       // log tracking
-      logTracking(trackingId,deliveryStatus)
+      logTracking(trackingId, deliveryStatus)
       res.send(result);
     })
 
@@ -278,8 +312,8 @@ async function run() {
 
     // version-2 : add payment info
     app.post('/create-checkout-session', async (req, res) => {
-      const paymentInfo = req.body;
-      const amount = parseInt(paymentInfo.cost) * 100;
+      const parcelInfo = req.body;
+      const amount = parseInt(parcelInfo.cost) * 100;
 
       const session = await stripe.checkout.sessions.create({
         line_items: [
@@ -288,18 +322,18 @@ async function run() {
               currency: 'USD',
               unit_amount: amount,
               product_data: {
-                name: paymentInfo.parcelName
+                name: parcelInfo.parcelName
               },
             },
             quantity: 1,
           },
         ],
-        customer_email: paymentInfo.senderEmail,
+        customer_email: parcelInfo.senderEmail,
         mode: 'payment',
         metadata: {
-          parcelId: paymentInfo.parcelId,
-          parcelName: paymentInfo.parcelName,
-          trackingId:paymentInfo.trackingId
+          parcelId: parcelInfo.parcelId,
+          parcelName: parcelInfo.parcelName,
+          trackingId: parcelInfo.trackingId
         },
         // use query
         success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
@@ -339,7 +373,7 @@ async function run() {
         const update = {
           $set: {
             paymentStatus: 'paid',
-            delivaryStatus: 'pending-pickup',
+            deliveryStatus: 'pending-pickup',
           }
         }
         const result = await parcelsCollection.updateOne(query, update);
@@ -357,23 +391,21 @@ async function run() {
           trackingId: trackingId
         }
 
-        if (session.payment_status === 'paid') {
-          const resultPayment = await paymentsCollection.insertOne(payment);
 
-          logTracking(trackingId,'parcel_paid')
+        const resultPayment = await paymentsCollection.insertOne(payment);
 
-          res.send({
-            success: true,
-            modifyParcel: result,
-            paymentInfo: resultPayment,
-            trackingId: trackingId,
-            transactionId: session.payment_intent
-          })
-        }
+        logTracking(trackingId, 'parcel_paid')
 
+        return res.send({
+          success: true,
+          modifyParcel: result,
+          paymentInfo: resultPayment,
+          trackingId: trackingId,
+          transactionId: session.payment_intent
+        })
       }
 
-      res.send({
+      return res.send({
         success: true
       })
     })
@@ -467,16 +499,6 @@ async function run() {
     // .............................................................................................
     //riders related api.............
 
-    app.post('/riders', async (req, res) => {
-      const rider = req.body;
-      // rider.role='rider';
-      rider.status = 'pending';
-      rider.createdAt = new Date();
-
-      const result = await ridersCollection.insertOne(rider);
-      res.send(result);
-    })
-
     // get riders
     app.get('/riders', async (req, res) => {
       // jodi pending status chai,tahole shudhu shei data dibo, na bolle shob dibo
@@ -494,6 +516,69 @@ async function run() {
       const result = await ridersCollection.find(query).toArray();
       res.send(result);
     })
+
+    //Mongodb Aggregate
+    app.get('/riders/delivery-per-day', async (req, res) => {
+      const email = req.query.email;
+
+      const pipeline = [
+        {
+          $match: {
+            riderEmail: email,
+            deliveryStatus: "parcel_deliverd"
+          }
+        },
+        {
+          $lookup: {
+            from: 'trackings',
+            localField: 'trackingId',
+            foreignField: "trackingId",
+            as: "parcel_trackings"
+          }
+        },
+        {
+          $unwind: "$parcel_trackings"
+        },
+        {
+          $match: {
+            "parcel_trackings.status": "parcel_deliverd"
+          }
+        },
+        {
+          // convert timestamp to YYYY-MM-DD string
+          $addFields: {
+            deliveryDay: {
+              $dateToString: {
+                format: "%Y-%m-%d",
+                date: "$parcel_trackings.createdAt"
+              }
+            }
+          }
+        },
+        {
+          // group by date
+          $group: {
+            _id: "$deliveryDay",
+            deliveredCount: { $sum: 1 }
+          }
+        }
+      ]
+      const result = await parcelsCollection.aggregate(pipeline).toArray();
+      res.send(result)
+    })
+
+    app.post('/riders', async (req, res) => {
+      const rider = req.body;
+      // rider.role='rider';
+      rider.status = 'pending';
+      rider.createdAt = new Date();
+
+      const result = await ridersCollection.insertOne(rider);
+      res.send(result);
+    })
+
+
+
     // update rider's status : pending--> approved/reject
     app.patch('/riders/:id', verifyFBToken, verifyAdmin, async (req, res) => {
       const status = req.body.status;
@@ -528,12 +613,12 @@ async function run() {
     // Tracking related apis
 
 
-    app.get('/trackings/:trackingId/logs',async(req,res)=>{
-      const trackingId=req.params.trackingId;
+    app.get('/trackings/:trackingId/logs', async (req, res) => {
+      const trackingId = req.params.trackingId;
       // console.log('Tracking Id: ',trackingId)
-      const query={trackingId};
+      const query = { trackingId };
 
-      const result=await trackingsCollection.find(query).toArray();
+      const result = await trackingsCollection.find(query).toArray();
       res.send(result);
     })
 
